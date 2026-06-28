@@ -35,6 +35,9 @@ def place_order(city, question, outcome, price, stake):
     """
     state = _load_state()
 
+    if price < 0.02 or price > 0.98:
+        return {"error": "price out of tradable range", "price": price}
+
     if stake > state["bankroll"]:
         return {"error": "not enough bankroll", "bankroll": state["bankroll"]}
 
