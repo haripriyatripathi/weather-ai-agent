@@ -3,13 +3,20 @@
 flow per city:
   weather forecast -> find threshold markets -> model gives our probability
   -> compare to market price -> kelly decides stake -> place a paper order.
+
+run normally:   python run_agent.py
+demo mode:      python run_agent.py --demo      (lowers edge threshold)
+verbose mode:   python run_agent.py --verbose   (shows reasoning for every market)
 """
 import re
+import sys
 from src.data.weather_global import get_weather, CITIES
 from src.data.polymarket import search_markets, extract_markets_from_event
 from src.model.predictor import _normal_cdf, FORECAST_STD
 from src.strategy.kelly import decide_bet
 from src.trading.paper_trader import place_order, show_summary, _load_state
+
+VERBOSE = False
 
 
 def parse_threshold(question):
@@ -68,19 +75,30 @@ def run_once():
             if yes_price is None:
                 continue
 
-            # skip markets priced at the extremes (no real liquidity there)
+            our_prob = our_yes_probability(forecast_high, temp, direction)
+
+            # in verbose mode, show our reasoning for this market
+            if VERBOSE:
+                short_q = m["question"][:50]
+                print(f"    [{short_q}...]")
+                print(f"      threshold {temp}F ({direction}) | "
+                      f"our {our_prob:.0%} vs market {yes_price:.2f} "
+                      f"| edge {our_prob - yes_price:+.2f}")
+
             if yes_price < 0.02 or yes_price > 0.98:
+                if VERBOSE:
+                    print("      -> skip (price at extreme, no liquidity)")
                 continue
 
-            our_prob = our_yes_probability(forecast_high, temp, direction)
             decision = decide_bet(our_prob, yes_price, _load_state()["bankroll"])
 
             if decision["action"] == "buy":
                 place_order(city, m["question"], "Yes", yes_price, decision["stake"])
-                print(f"  BUY Yes on '{m['question'][:45]}...' "
-                      f"@ {yes_price:.3f} | our {our_prob:.0%} "
+                print(f"  BUY Yes @ {yes_price:.3f} | our {our_prob:.0%} "
                       f"| stake ${decision['stake']} | edge {decision['edge']:+.2f}")
                 placed_any = True
+            elif VERBOSE:
+                print(f"      -> skip ({decision.get('reason', 'no edge')})")
 
         if not placed_any:
             print("  no edge big enough, no bet placed")
@@ -91,4 +109,11 @@ def run_once():
 
 
 if __name__ == "__main__":
+    if "--verbose" in sys.argv:
+        VERBOSE = True
+        print(">>> VERBOSE MODE: showing the agent's reasoning for every market <<<\n")
+    if "--demo" in sys.argv:
+        import src.strategy.kelly as kelly
+        kelly.MIN_EDGE = 0.0
+        print(">>> DEMO MODE: edge threshold lowered to show live trading <<<\n")
     run_once()
